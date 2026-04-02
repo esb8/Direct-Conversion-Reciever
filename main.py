@@ -36,15 +36,37 @@ circuit.model('1N5819', 'D',
     IAVE=1,           # Average forward current (not always used in simulations)
     VPK=40            # Peak reverse voltage (optional, mainly for transient/stress)
 )
+
+circuit.model('RSR025P03', 'VDMOS',
+    pchan=True,
+    Rg=34,
+    Vto=-2.1220,
+    Rd=46.3e-3,
+    Rs=10e-3,
+    Rb=90.131e-3,
+    Kp=9.2,
+    Lambda=0.05,
+    Cgdmin=40e-12,
+    Cgdmax=230e-12,
+    A=0.5,
+    Cgso=395e-12,
+    Is=142.28e-12,
+    N=1.334,
+    Cjo=110.02e-12,
+    M=0.3843,
+    Vj=0.77453,
+    TT=20e-9,
+    ksubthres=0.1,
+    Vds=-30,
+    Ron=70e-3,
+    Qg=5.4e-9
+)
 class BPF(SubCircuit):
     __nodes__ = ('In', 'Out')
     def __init__(self, name, L=10@u_uH, C=100@u_pF):
         SubCircuit.__init__(self, name, *self.__nodes__)
         self.L(1, 'In', 'Out', L)
         self.C(1, 'Out', circuit.gnd, C)
-
-
-
 
 class Diode_Ring_Mixer(SubCircuit):
     __nodes__ = ('RF_In', 'LO_In', 'IF_Out')
@@ -108,8 +130,8 @@ class BJT_CE(SubCircuit):
 class BJT_Colpitts(SubCircuit):
     __nodes__ = ('Vcc', 'LC_In', 'C', 'E')
 
-    def __init__(self, name, R1=20@u_kOhm, R2=10@u_kOhm, Re=3@u_kOhm, Cc=10@u_nF, Fcap=10@u_nF,
-                 Rc=5.9@u_kOhm, C1=810@u_pF, C2=810@u_pF, L1=1@u_uH):
+    def __init__(self, name, R1=20@u_kOhm, R2=10@u_kOhm, Re=3@u_kOhm, Cc=0.47@u_uF, Fcap=0.47@u_uF,
+                 Rc=5.9@u_kOhm, C1=70@u_pF, C2=70@u_pF, L1=10@u_uH):
         SubCircuit.__init__(self, name, *self.__nodes__)
         Vcc = 12@u_V
         # Divider Bias and VCC
@@ -157,6 +179,22 @@ class BJT_SF(SubCircuit):
         self.R(4, 'E', self.gnd, Re)
         self.Q('Q1', 'C', 'B', 'E', model='2N3904')
 
+class PMOS_SF(SubCircuit):
+    __nodes__ = ('In', 'Out')
+    def __init__(self, name, Re=100@u_Ohm):
+        SubCircuit.__init__(self, name, *self.__nodes__)
+        Vcc = 12@u_V
+        self.V('VDD', 'VDD', self.gnd, Vcc)
+        # Source
+        self.R(4, 'S', 'VDD', Re)
+        self.C(10, 'S', 'Out', 100@u_nF)
+        self.R(5, 'Out', circuit.gnd, 10@u_kOhm)
+        # Gate 
+        self.R(7, 'G', 'VDD', 100@u_kOhm) 
+        self.R(6, 'G', circuit.gnd, 20@u_kOhm)
+        self.M('Q1', circuit.gnd, 'G', 'S', 'body', model='RSR025P03')
+
+
 class Audio_Diplexer(SubCircuit):
     __nodes__ = ('Audio_In', 'Audio_Out')
     def __init__(self, name, L=100@u_uH, C=0.47@u_uF):
@@ -172,6 +210,7 @@ circuit.subcircuit(BJT_SF('Pre_RF_Buffer'))
 circuit.subcircuit(BJT_Colpitts('Colpitts_Osc'))
 circuit.subcircuit(Diode_Ring_Mixer('Mixer'))
 circuit.subcircuit(Audio_Diplexer('Diplexer'))
+circuit.subcircuit(PMOS_SF('PMOS_SF'))
 
 
 
@@ -179,10 +218,12 @@ circuit.subcircuit(Audio_Diplexer('Diplexer'))
 circuit.V(1, 'Source', circuit.gnd, 'SINE(0 0.000001 7102000)')
 circuit.R(1, 'Source', 'RF_Out', 1@u_Ohm)
 circuit.X(1, 'Colpitts_Osc', 'VDD', 'LC_In', 'C', 'E')
-circuit.X(2, 'Post_RF_Buffer', 'C', 'BufferOut')
-circuit.X(3, 'Mixer', 'RF_Out', 'BufferOut', 'IF_Out')
+circuit.C(10, 'C', 'PMOS_SF_INPUT', 1@u_pF)
+circuit.X(5, 'PMOS_SF', 'PMOS_SF_INPUT', 'BufferOut')
+#circuit.X(2, 'Post_RF_Buffer', 'Buffer_In', 'BufferOut')
+"""circuit.X(3, 'Mixer', 'RF_Out', 'BufferOut', 'IF_Out')
 circuit.R(2, 'IF_Out', 'Audio', 1@u_kOhm)
-circuit.C(1, 'Audio', circuit.gnd, 100e-6@u_F)
+circuit.C(1, 'Audio', circuit.gnd, 100e-6@u_F)"""
 # circuit.X(4, 'Diplexer', 'Audio', 'Audio_Out')
 
 print(str(circuit))
@@ -198,11 +239,11 @@ from PySpice.Unit import *
 simulator = circuit.simulator(temperature=25, nominal_temperature=25)
 
 # Small step time to resolve MHz oscillation, total 1 ms
-analysis = simulator.transient(step_time=0.005@u_us, end_time=30@u_ms)
+analysis = simulator.transient(step_time=0.005@u_us, end_time=10@u_ms)
 
 # --- Extract time-domain waveform ---
 time = np.array(analysis.time)
-voltage = np.array(analysis['IF_Out'])  # oscillator output node
+voltage = np.array(analysis['BufferOut'])  # oscillator output node
 
 # --- Plot time-domain waveform ---
 plt.figure()
